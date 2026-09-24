@@ -1,4 +1,5 @@
 #pragma comment(lib, "windowsapp")
+#pragma comment(lib, "shcore")
 
 #include <atomic>
 #include <chrono>
@@ -8,6 +9,8 @@
 
 // This must be included before many other Windows headers.
 #include <windows.h>
+
+#include <shcore.h>
 
 #include <flutter/event_channel.h>
 #include <flutter/event_stream_handler_functions.h>
@@ -22,6 +25,8 @@
 #include <winrt/Windows.Media.Audio.h>
 #include <winrt/Windows.Media.Core.h>
 #include <winrt/Windows.Media.Playback.h>
+#include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.h>
 // One line per method call is useful when working on the plugin and pure noise
 // in a shipped app — every setVolume, setSpeed, setPitch, setSkipSilence,
@@ -618,6 +623,10 @@ public:
       const std::string* type = std::get_if<std::string>(ValueOrNull(source, "type"));
       if (type->compare("progressive") == 0 || type->compare("dash") == 0 || type->compare("hls") == 0) {
           const auto* uri = std::get_if<std::string>(ValueOrNull(source, "uri"));
+          if (const auto path = FileUriToWindowsPath(*uri)) {
+              auto fromFile = createFileMediaSource(*path);
+              if (fromFile) return fromFile;
+          }
           return MediaSource::CreateFromUri(
               Uri(TO_WIDESTRING(EncodeSpacesInUri(*uri)))
           );
@@ -625,6 +634,36 @@ public:
       else {
           throw std::invalid_argument("Source is unsupported or can not be nested: " + *type);
       }
+  }
+
+  /**
+  * Opens a local file by its path and wraps it in a MediaSource.
+  *
+  * Media Foundation resolves a file: URL with its own percent-decoding, which
+  * mangles multi-byte UTF-8 escapes: a file under C:\Users\Документы failed
+  * with ERROR_PATH_NOT_FOUND although it existed. The Win32 bridge takes the
+  * wide path directly, so nothing is re-decoded. Synchronous on purpose: this
+  * runs on the platform thread, where blocking on the WinRT
+  * StorageFile::GetFileFromPathAsync is not allowed.
+  *
+  * Returns nullptr when the file cannot be opened; the caller then falls back
+  * to CreateFromUri, which keeps the existing error reporting (ItemFailed) for
+  * missing files.
+  */
+  MediaSource AudioPlayer::createFileMediaSource(const std::string& path) const {
+      winrt::Windows::Storage::Streams::IRandomAccessStream stream{ nullptr };
+      const HRESULT hr = ::CreateRandomAccessStreamOnFile(
+          TO_WIDESTRING(path).c_str(),
+          static_cast<DWORD>(winrt::Windows::Storage::FileAccessMode::Read),
+          winrt::guid_of<winrt::Windows::Storage::Streams::IRandomAccessStream>(),
+          winrt::put_abi(stream));
+      if (FAILED(hr) || !stream) {
+          std::cerr << "[just_audio_windows] Could not open the file by path (hr=0x"
+                    << std::hex << static_cast<unsigned long>(hr) << std::dec
+                    << "), falling back to the URI" << std::endl;
+          return nullptr;
+      }
+      return MediaSource::CreateFromStream(stream, winrt::to_hstring(MimeTypeForPath(path)));
   }
 
 

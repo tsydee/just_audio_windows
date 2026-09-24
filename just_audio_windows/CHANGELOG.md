@@ -1,5 +1,6 @@
 ## Unreleased
 
+* [fix]: Open local files by path instead of by `file:` URL; paths with non-ASCII characters (e.g. a Cyrillic Documents folder) failed with "The system cannot find the path specified"
 * [fix]: Do not report `completed` before the duration is known ([#66](https://github.com/bdlukaa/just_audio_windows/pull/66))
 * [fix]: Do not report a source swap as `idle`, which aborted the load in progress ([#65](https://github.com/bdlukaa/just_audio_windows/pull/65))
 * [chore]: Only trace every method call in debug builds, and warn once about BufferingProgress ([#64](https://github.com/bdlukaa/just_audio_windows/pull/64))
